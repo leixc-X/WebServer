@@ -81,6 +81,7 @@ public:
   bool read();
   /* 非阻塞写 */
   bool write();
+  sockaddr_in *get_address() { return &m_address; }
 
 private:
   /* 初始化连接 */

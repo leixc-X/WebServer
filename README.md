@@ -7,9 +7,13 @@ Linux下轻量级Web服务器，自学网络编程入门项目，后续会持续
 
 ### 环境要求
 
- * Ubuntu 20.04
- * C/C++
+* 服务器测试环境
+   * Ubuntu 20.04
+   * C/C++
   
+* 浏览器测试环境
+	* Windows、Linux
+	* Chrome、FireFox
 
 ### 快速运行
 
@@ -42,6 +46,9 @@ Linux下轻量级Web服务器，自学网络编程入门项目，后续会持续
     ├── http            http连接处理类
     │   ├── http_conn.cpp
     │   └── http_conn.h
+    ├── timer            定时升序链表类
+    │   ├── list_time.cpp
+    │   └── list_time.h
     ├── lock            线程同步机制包装类
     │   └── locker.h
     ├── main.cpp        主入口

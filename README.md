@@ -14,13 +14,26 @@ Linux下轻量级Web服务器，自学网络编程入门项目，后续会持续
 ### 快速运行
 
 * 修改资源路径地址      ./http/http_conn.cpp
-   ``` /* 网站根目录 */  const char *doc_root = "/home/xxx/linuxWebServer/root"; ```
+  
+  ``` 
+  /* 网站根目录 */  const char *doc_root = "/home/xxx/linuxWebServer/root";
+  ```
+  
  * 项目根目录
-      ```  make server ```
+ 
+    ``` 
+    make server
+    ```
  * 启动server
-  ```  ./server [ip] [port]  ```
+ 
+    ``` 
+    ./server [ip] [port]
+    ```
  * 浏览器端
-   ``` ip:port/[目标资源] ```
+ 
+   ```
+   ip:port/[目标资源]
+   ```
 
 
 ### 代码结构
@@ -45,4 +58,5 @@ Linux下轻量级Web服务器，自学网络编程入门项目，后续会持续
 ### 参考
 
 Linux高性能服务器编程，游双著.
+
 [TinyWebServer  qinguoyi]([链接地址](https://github.com/qinguoyi/TinyWebServer#%E6%A6%82%E8%BF%B0)) 

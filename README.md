@@ -20,9 +20,9 @@ Linux下轻量级Web服务器，自学网络编程入门项目，后续会持续
   ```
   
  * 项目根目录
-      ``` 
-      make server
-      ```
+  ``` 
+  make server
+  ```
  * 启动server
   ``` 
   ./server [ip] [port]

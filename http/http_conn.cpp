@@ -1,5 +1,11 @@
 #include "http_conn.h"
 
+//#define CONNFDET //边缘触发非阻塞
+#define CONNFDLT //水平触发阻塞
+
+//#define LISTENFDET //边缘触发非阻塞
+#define LISTENFDLT //水平触发阻塞
+
 /* 定义HTTP相应状态信息 */
 const char *ok_200_title = "OK";
 const char *error_400_title = "Bad Request";
@@ -28,7 +34,14 @@ int setnonblocking(int fd) {
 void addfd(int epollfd, int fd, bool one_shot) {
   epoll_event event;
   event.data.fd = fd;
+#ifdef CONNFDET
   event.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
+#endif
+
+#ifdef CONNFDLT
+  event.events = EPOLLIN | EPOLLRDHUP;
+#endif
+
   if (one_shot) {
     event.events |= EPOLLONESHOT;
   }
@@ -44,7 +57,13 @@ void removefd(int epollfd, int fd) {
 void modfd(int epollfd, int fd, int ev) {
   epoll_event event;
   event.data.fd = fd;
+#ifdef CONNFDET
   event.events = ev | EPOLLET | EPOLLONESHOT | EPOLLRDHUP;
+#endif
+
+#ifdef CONNFDLT
+  event.events = ev | EPOLLONESHOT | EPOLLRDHUP;
+#endif
   epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &event);
 }
 
@@ -53,7 +72,6 @@ int http_conn::m_epollfd = -1;
 
 void http_conn::close_conn(bool real_close) {
   if (real_close && (m_sockfd != -1)) {
-    // modfd( m_epollfd, m_sockfd, EPOLLIN );
     removefd(m_epollfd, m_sockfd);
     m_sockfd = -1;
     m_user_count--; /* 关闭一个连接时，客户数量减一 */
@@ -71,14 +89,12 @@ void http_conn::init(int sockfd, const sockaddr_in &addr) {
   // setsockopt( m_sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof( reuse ) );
   addfd(m_epollfd, sockfd, true);
   m_user_count++;
-
   init();
 }
 
 void http_conn::init() {
   m_check_state = CHECK_STATE_REQUESTLINE;
   m_linger = false;
-
   m_method = GET;
   m_url = 0;
   m_version = 0;
@@ -140,21 +156,37 @@ bool http_conn::read() {
   }
 
   int bytes_read = 0;
+
+#ifdef CONNFDLT
+
+  bytes_read =
+      recv(m_sockfd, m_read_buf + m_read_idx, READ_BUFFER_SIZE - m_read_idx, 0);
+
+  if (bytes_read <= 0) {
+    return false;
+  }
+
+  m_read_idx += bytes_read;
+
+  return true;
+
+#endif
+
+#ifdef connfdET
   while (true) {
     bytes_read = recv(m_sockfd, m_read_buf + m_read_idx,
                       READ_BUFFER_SIZE - m_read_idx, 0);
     if (bytes_read == -1) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
         break;
-      }
       return false;
     } else if (bytes_read == 0) {
       return false;
     }
-
     m_read_idx += bytes_read;
   }
   return true;
+#endif
 }
 
 /* 解析HTTP请求行，获取请求方法、目标URL、HTTP版本号 */
@@ -231,7 +263,9 @@ http_conn::HTTP_CODE http_conn::parse_headers(char *text) {
     text += strspn(text, " \t");
     m_host = text;
   } else {
-    printf("oop! unknow header %s\n", text);
+    // printf("oop! unknow header %s\n", text);
+    LOG_INFO("oop!unknow header: %s", text);
+    Log::get_instance()->flush();
   }
 
   return NO_REQUEST;
@@ -257,7 +291,10 @@ http_conn::HTTP_CODE http_conn::process_read() {
          ((line_status = parse_line()) == LINE_OK)) {
     text = get_line();
     m_start_line = m_checked_idx;
-    printf("got 1 http line: %s\n", text);
+    // printf("got 1 http line: %s\n", text);
+
+    LOG_INFO("%s", text);
+    Log::get_instance()->flush();
 
     switch (m_check_state) {
     case CHECK_STATE_REQUESTLINE: {
@@ -284,9 +321,8 @@ http_conn::HTTP_CODE http_conn::process_read() {
       line_status = LINE_OPEN;
       break;
     }
-    default: {
+    default:
       return INTERNAL_ERROR;
-    }
     }
   }
 
@@ -386,6 +422,8 @@ bool http_conn::add_response(const char *format, ...) {
   }
   m_write_idx += len;
   va_end(arg_list);
+  LOG_INFO("request:%s", m_write_buf);
+  Log::get_instance()->flush();
   return true;
 }
 
@@ -481,7 +519,9 @@ bool http_conn::process_write(HTTP_CODE ret) {
 void http_conn::process() {
   HTTP_CODE read_ret = process_read();
   if (read_ret == NO_REQUEST) {
-    /* EPOLLIN事件则只有当对端有数据写入时才会触发，所以触发一次后需要不断读取所有数据直到读完EAGAIN为止。否则剩下的数据只有在下次对端有写入时才能一起取出来了。
+    /* EPOLLIN事件则只有当对端有数据写入时才会触发
+     * 所以触发一次后需要不断读取所有数据直到读完EAGAIN为止
+     * 否则剩下的数据只有在下次对端有写入时才能一起取出来了。
      */
     modfd(m_epollfd, m_sockfd, EPOLLIN);
     return;
@@ -491,6 +531,7 @@ void http_conn::process() {
   if (!write_ret) {
     close_conn();
   }
+
   /* EPOLLOUT事件只有在不可写到可写的转变时刻，才会触发一次 */
   modfd(m_epollfd, m_sockfd, EPOLLOUT);
 }

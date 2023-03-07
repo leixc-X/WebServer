@@ -2,6 +2,7 @@
 #define HTTPCONNECTION_H
 
 #include "../lock/locker.h"
+#include "../log/log.h"
 #include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>

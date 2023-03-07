@@ -3,6 +3,8 @@
 Linux下轻量级Web服务器，自学网络编程入门项目，后续会持续完善功能
 * 使用线程池 + 非阻塞socket + epoll的并发模型
 * 使用状态机解析HTTP请求报文，目前仅支持GET请求
+* 基于升序链表实现定时器，关闭超时的非活动连接
+* 利用单例模式与阻塞队列实现异步的日志系统，记录服务器运行状态
 
 
 ### 环境要求
@@ -46,9 +48,13 @@ Linux下轻量级Web服务器，自学网络编程入门项目，后续会持续
     ├── http            http连接处理类
     │   ├── http_conn.cpp
     │   └── http_conn.h
-    ├── timer            定时升序链表类
+    ├── timer           定时升序链表类
     │   ├── list_time.cpp
     │   └── list_time.h
+    ├── log             日志
+    │   ├── log.cpp
+    │   └── log.h
+    │   └── block_queue.h
     ├── lock            线程同步机制包装类
     │   └── locker.h
     ├── main.cpp        主入口

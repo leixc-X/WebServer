@@ -155,13 +155,19 @@ private:
 
   /* 客户请求的目标文件被mmap到内存中启示位置 */
   char *m_file_address;
-  /* 目标文件状态，用于判断文件是否存在，是否为根目录，是否可读，并获取文件大小等信息
+  /* 目标文件状态，用于判断文件
+   * 是否存在，是否为根目录，是否可读，并获取文件大小等信息
    */
   struct stat m_file_stat;
-  /* 采用write来执行写操作，所以定义下面两个成员，其中 m_iv_count
-   * 表示被写入内存块的数量 */
+  /* 采用write来执行写操作，所以定义下面两个成员
+   * 其中 m_iv_count 表示被写入内存块的数量
+   */
   struct iovec m_iv[2];
   int m_iv_count;
+
+  int cgi; // 是否启用的POST
+  int bytes_have_send;
+  int bytes_to_send;
 };
 
 #endif

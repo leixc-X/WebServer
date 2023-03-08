@@ -1,9 +1,9 @@
 #ifndef THREADPOOL_H
 #define THREADPOOL_H
 
-#include <list>
 #include <cstdio>
 #include <exception>
+#include <list>
 #include <pthread.h>
 
 /* 使用线程同步机制包装类 */
@@ -74,13 +74,18 @@ template <typename T> bool threadpool<T>::append(T *request) {
     m_queuelocker.unlock();
     return false;
   }
+  /* 添加任务 */
   m_workqueue.push_back(request);
   m_queuelocker.unlock();
+
+  /* 信号提醒有任务需要处理 */
   m_queuestat.post();
   return true;
 }
 
 template <typename T> void *threadpool<T>::worker(void *arg) {
+
+  /* 将参数强转为线程池类，调用成员方法 */
   threadpool *pool = (threadpool *)arg;
   pool->run();
   return pool;
@@ -88,18 +93,24 @@ template <typename T> void *threadpool<T>::worker(void *arg) {
 
 template <typename T> void threadpool<T>::run() {
   while (!m_stop) {
+    /* 等待信号量 */
     m_queuestat.wait();
+
+    /* 被唤醒的先加互斥锁 */
     m_queuelocker.lock();
     if (m_workqueue.empty()) {
       m_queuelocker.unlock();
       continue;
     }
+    /* 从请求队列中取出第一个任务，并将其从请求队列中删除 */
     T *request = m_workqueue.front();
     m_workqueue.pop_front();
     m_queuelocker.unlock();
     if (!request) {
       continue;
     }
+
+    /* 交给HTTP处理类 */
     request->process();
   }
 }

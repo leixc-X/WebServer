@@ -104,6 +104,9 @@ void http_conn::init() {
   m_checked_idx = 0;
   m_read_idx = 0;
   m_write_idx = 0;
+  cgi = 0;
+  bytes_have_send = 0;
+  bytes_to_send = 0;
   memset(m_read_buf, '\0', READ_BUFFER_SIZE);
   memset(m_write_buf, '\0', WRITE_BUFFER_SIZE);
   memset(m_real_file, '\0', FILENAME_LEN);
@@ -201,6 +204,9 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char *text) {
   char *method = text;
   if (strcasecmp(method, "GET") == 0) {
     m_method = GET;
+  } else if (strcasecmp(method, "POST") == 0) {
+    m_method = POST;
+    cgi = 1;
   } else {
     return BAD_REQUEST;
   }
@@ -224,6 +230,9 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char *text) {
   if (!m_url || m_url[0] != '/') {
     return BAD_REQUEST;
   }
+  //当url为/时，显示默认页面
+  if (strlen(m_url) == 1)
+    strcat(m_url, "index.html");
   /* HTTP请求行处理完毕，状态转移到头部字段的分析 */
   m_check_state = CHECK_STATE_HEADER;
   return NO_REQUEST;
@@ -334,7 +343,31 @@ http_conn::HTTP_CODE http_conn::process_read() {
 http_conn::HTTP_CODE http_conn::do_request() {
   strcpy(m_real_file, doc_root);
   int len = strlen(doc_root);
+
+  const char *p = strrchr(m_url, '/');
+
   strncpy(m_real_file + len, m_url, FILENAME_LEN - len - 1);
+
+  if (*(p + 1) == '0') {
+    char *m_url_real = (char *)malloc(sizeof(char) * 200);
+    strcpy(m_url_real, "/welcome.html");
+    strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
+
+    free(m_url_real);
+  } else if (*(p + 1) == '5') {
+    char *m_url_real = (char *)malloc(sizeof(char) * 200);
+    strcpy(m_url_real, "/picture.html");
+    strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
+
+    free(m_url_real);
+  } else if (*(p + 1) == '6') {
+    char *m_url_real = (char *)malloc(sizeof(char) * 200);
+    strcpy(m_url_real, "/video.html");
+    strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
+
+    free(m_url_real);
+  }
+
   if (stat(m_real_file, &m_file_stat) < 0) /* stat()函数获取文件信息 */
   {
     return NO_RESOURCE;
@@ -363,11 +396,56 @@ void http_conn::unmap() {
   }
 }
 
+// /* 写HTTP 响应 */
+// bool http_conn::write() {
+//   int temp = 0;
+//   int bytes_have_send = 0;
+//   int bytes_to_send = m_write_idx;
+//   if (bytes_to_send == 0) {
+//     modfd(m_epollfd, m_sockfd, EPOLLIN);
+//     init();
+//     return true;
+//   }
+
+//   while (1) {
+//     temp = writev(m_sockfd, m_iv, m_iv_count);
+//     if (temp <= -1) {
+//       /* 如果TCP
+//        * 写缓冲没有空间，则等待下一轮EPOLLOUT事件，虽然在此期间
+//        * 服务器无法立即接收到同一客户端的下一个请求，但这样可以保证连接的完整性
+//        */
+//       if (errno == EAGAIN) {
+//         modfd(m_epollfd, m_sockfd, EPOLLOUT);
+//         return true;
+//       }
+//       unmap();
+//       return false;
+//     }
+
+//     bytes_to_send -= temp;
+//     bytes_have_send += temp;
+
+//     /* 发送HTTP响应成功
+//      * 根据HTTP请求中的 Contention 字段决定是否理解关闭连接
+//      */
+//     if (bytes_to_send <= bytes_have_send) {
+//       unmap();
+//       if (m_linger) {
+//         init();
+//         modfd(m_epollfd, m_sockfd, EPOLLIN);
+//         return true;
+//       } else {
+//         modfd(m_epollfd, m_sockfd, EPOLLIN);
+//         return false;
+//       }
+//     }
+//   }
+// }
+
 /* 写HTTP 响应 */
 bool http_conn::write() {
   int temp = 0;
-  int bytes_have_send = 0;
-  int bytes_to_send = m_write_idx;
+
   if (bytes_to_send == 0) {
     modfd(m_epollfd, m_sockfd, EPOLLIN);
     init();
@@ -377,8 +455,10 @@ bool http_conn::write() {
   while (1) {
     temp = writev(m_sockfd, m_iv, m_iv_count);
     if (temp <= -1) {
-      /* 如果TCP*
-       * 写缓冲没有空间，则等待下一轮EPOLLOUT事件，虽然在此期间，服务器无法立即接收到同一客户端的下一个请求，但这样可以保证连接的完整性*/
+      /* 如果TCP
+       * 写缓冲没有空间，则等待下一轮EPOLLOUT事件，虽然在此期间
+       * 服务器无法立即接收到同一客户端的下一个请求，但这样可以保证连接的完整性
+       */
       if (errno == EAGAIN) {
         modfd(m_epollfd, m_sockfd, EPOLLOUT);
         return true;
@@ -389,16 +469,27 @@ bool http_conn::write() {
 
     bytes_to_send -= temp;
     bytes_have_send += temp;
-    /* 发送HTTP响应成功，根据HTTP请求中的Contention 字段决定是否理解关闭连接
+
+    if (bytes_have_send >= m_iv[0].iov_len) {
+      m_iv[0].iov_len = 0;
+      m_iv[1].iov_base = m_file_address + (bytes_have_send - m_write_idx);
+      m_iv[1].iov_len = bytes_to_send;
+    } else {
+      m_iv[0].iov_base = m_write_buf + bytes_have_send;
+      m_iv[0].iov_len = m_iv[0].iov_len - bytes_have_send;
+    }
+
+    /* 发送HTTP响应成功
+     * 根据HTTP请求中的 Contention 字段决定是否理解关闭连接
      */
-    if (bytes_to_send <= bytes_have_send) {
+    if (bytes_to_send <= 0) {
       unmap();
+      modfd(m_epollfd, m_sockfd, EPOLLIN);
+
       if (m_linger) {
         init();
-        modfd(m_epollfd, m_sockfd, EPOLLIN);
         return true;
       } else {
-        modfd(m_epollfd, m_sockfd, EPOLLIN);
         return false;
       }
     }
@@ -495,6 +586,7 @@ bool http_conn::process_write(HTTP_CODE ret) {
       m_iv[1].iov_base = m_file_address;
       m_iv[1].iov_len = m_file_stat.st_size;
       m_iv_count = 2;
+      bytes_to_send = m_write_idx + m_file_stat.st_size;
       return true;
     } else {
       const char *ok_string = "<html><body></body></html>";
@@ -512,6 +604,7 @@ bool http_conn::process_write(HTTP_CODE ret) {
   m_iv[0].iov_base = m_write_buf;
   m_iv[0].iov_len = m_write_idx;
   m_iv_count = 1;
+  bytes_to_send = m_write_idx;
   return true;
 }
 

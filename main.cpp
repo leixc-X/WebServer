@@ -1,20 +1,20 @@
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
-#include <stdio.h>
-#include <unistd.h>
+#include <cassert>
 #include <errno.h>
 #include <fcntl.h>
+#include <netinet/in.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <cassert>
 #include <sys/epoll.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
-#include "./log/log.h"
-#include "./timer/lst_timer.h"
 #include "./http/http_conn.h"
 #include "./lock/locker.h"
+#include "./log/log.h"
 #include "./threadpool/threadpool.h"
+#include "./timer/lst_timer.h"
 
 #define MAX_FD 65536           //最大文件描述符
 #define MAX_EVENT_NUMBER 10000 //最大事件数
@@ -100,10 +100,14 @@ int main(int argc, char *argv[]) {
   /* 忽略SIGPIPE信号 */
   addsig(SIGPIPE, SIG_IGN);
 
+  //创建数据库连接池
+  connection_pool *connPool = connection_pool::GetInstance();
+  connPool->init("localhost", "root", "admin", "WebServer", 3306, 8);
+
   /* 创建线程池 */
   threadpool<http_conn> *pool = NULL;
   try {
-    pool = new threadpool<http_conn>;
+    pool = new threadpool<http_conn>(connPool);
   } catch (...) {
     return 1;
   }
@@ -111,6 +115,9 @@ int main(int argc, char *argv[]) {
   /* 预先为每个可能的客户连接分配一个http_conn 对象 */
   http_conn *users = new http_conn[MAX_FD];
   assert(users);
+
+  //初始化数据库读取表
+  users->initmysql_result(connPool);
 
   int listenfd = socket(PF_INET, SOCK_STREAM, 0);
   assert(listenfd >= 0);
@@ -253,7 +260,7 @@ int main(int argc, char *argv[]) {
           if (timer) {
             time_t cur = time(NULL);
             timer->expire = cur + 3 * TIMESLOT;
-       
+
             LOG_INFO("%s", "adjust timer once");
             Log::get_instance()->flush();
 
@@ -283,7 +290,7 @@ int main(int argc, char *argv[]) {
           if (timer) {
             time_t cur = time(NULL);
             timer->expire = cur + 3 * TIMESLOT;
-          
+
             LOG_INFO("%s", "adjust timer once");
             Log::get_instance()->flush();
 

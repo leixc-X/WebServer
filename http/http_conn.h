@@ -1,6 +1,7 @@
 #ifndef HTTPCONNECTION_H
 #define HTTPCONNECTION_H
 
+#include "../CGImysql/sql_connection_pool.h"
 #include "../lock/locker.h"
 #include "../log/log.h"
 #include <arpa/inet.h>
@@ -83,6 +84,7 @@ public:
   /* 非阻塞写 */
   bool write();
   sockaddr_in *get_address() { return &m_address; }
+  void initmysql_result(connection_pool *connPool);
 
 private:
   /* 初始化连接 */
@@ -106,6 +108,7 @@ private:
   bool add_content(const char *content);
   bool add_status_line(int status, const char *title);
   bool add_headers(int content_length);
+  bool add_content_type();
   bool add_content_length(int content_length);
   bool add_linger();
   bool add_blank_line();
@@ -115,6 +118,7 @@ public:
   static int m_epollfd;
   /* 统计数量 */
   static int m_user_count;
+  MYSQL *mysql;
 
 private:
   /* 该HTTP连接的socket和对方的socket地址 */
@@ -165,7 +169,8 @@ private:
   struct iovec m_iv[2];
   int m_iv_count;
 
-  int cgi; // 是否启用的POST
+  int cgi;        // 是否启用的POST
+  char *m_string; //存储请求头数据
   int bytes_have_send;
   int bytes_to_send;
 };

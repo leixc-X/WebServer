@@ -1,4 +1,8 @@
 #include "http_conn.h"
+#include "../log/log.h"
+#include <map>
+#include <mysql/mysql.h>
+#include <fstream>
 
 //#define CONNFDET //边缘触发非阻塞
 #define CONNFDLT //水平触发阻塞
@@ -23,6 +27,37 @@ const char *error_500_form =
 
 /* 网站根目录 */
 const char *doc_root = "/home/lxc/coding/myProject/linuxWebServer/root";
+
+//将表中的用户名和密码放入map
+map<string, string> users;
+locker m_lock;
+
+void http_conn::initmysql_result(connection_pool *connPool) {
+  //先从连接池中取一个连接
+  MYSQL *mysql = NULL;
+  connectionRAII mysqlcon(&mysql, connPool);
+
+  //在user表中检索username，passwd数据，浏览器端输入
+  if (mysql_query(mysql, "SELECT username,passwd FROM user")) {
+    LOG_ERROR("SELECT error:%s\n", mysql_error(mysql));
+  }
+
+  //从表中检索完整的结果集
+  MYSQL_RES *result = mysql_store_result(mysql);
+
+  //返回结果集中的列数
+  int num_fields = mysql_num_fields(result);
+
+  //返回所有字段结构的数组
+  MYSQL_FIELD *fields = mysql_fetch_fields(result);
+
+  //从结果集中获取下一行，将对应的用户名和密码，存入map中
+  while (MYSQL_ROW row = mysql_fetch_row(result)) {
+    string temp1(row[0]);
+    string temp2(row[1]);
+    users[temp1] = temp2;
+  }
+}
 
 int setnonblocking(int fd) {
   int old_option = fcntl(fd, F_GETFL);
@@ -93,6 +128,7 @@ void http_conn::init(int sockfd, const sockaddr_in &addr) {
 }
 
 void http_conn::init() {
+  mysql = NULL;
   m_check_state = CHECK_STATE_REQUESTLINE;
   m_linger = false;
   m_method = GET;
@@ -113,7 +149,6 @@ void http_conn::init() {
 }
 
 /* 从状态机 */
-
 http_conn::LINE_STATUS http_conn::parse_line() {
   char temp;
   /* m_checked_idx
@@ -147,7 +182,8 @@ http_conn::LINE_STATUS http_conn::parse_line() {
       return LINE_BAD;
     }
   }
-  /* 如果所有内容分析后没有遇到 \r ,则返回LINE_OPEN 继续获取客户端数据进一部分析
+  /* 如果所有内容分析后没有遇到 \r
+   * 则返回LINE_OPEN 继续获取客户端数据进一部分析
    */
   return LINE_OPEN;
 }
@@ -200,7 +236,6 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char *text) {
     return BAD_REQUEST;
   }
   *m_url++ = '\0';
-
   char *method = text;
   if (strcasecmp(method, "GET") == 0) {
     m_method = GET;
@@ -227,6 +262,11 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char *text) {
     m_url = strchr(m_url, '/');
   }
 
+  if (strncasecmp(m_url, "https://", 8) == 0) {
+    m_url += 8;
+    m_url = strchr(m_url, '/');
+  }
+
   if (!m_url || m_url[0] != '/') {
     return BAD_REQUEST;
   }
@@ -242,9 +282,9 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char *text) {
 http_conn::HTTP_CODE http_conn::parse_headers(char *text) {
   /* 遇到空行，表示头部字段解析完毕 */
   if (text[0] == '\0') {
-    if (m_method == HEAD) {
-      return GET_REQUEST;
-    }
+    // if (m_method == HEAD) {
+    //   return GET_REQUEST;
+    // }
     /* 如果HTTP请求有请求体，则还需要读取 m_content_length
      * 字节消息体，状态机转移到 CHECK_STATE_CONTENT 状态 */
     if (m_content_length != 0) {
@@ -284,6 +324,8 @@ http_conn::HTTP_CODE http_conn::parse_headers(char *text) {
 http_conn::HTTP_CODE http_conn::parse_content(char *text) {
   if (m_read_idx >= (m_content_length + m_checked_idx)) {
     text[m_content_length] = '\0';
+    // POST请求中最后为输入的用户名和密码
+    m_string = text;
     return GET_REQUEST;
   }
 
@@ -346,11 +388,76 @@ http_conn::HTTP_CODE http_conn::do_request() {
 
   const char *p = strrchr(m_url, '/');
 
-  strncpy(m_real_file + len, m_url, FILENAME_LEN - len - 1);
+  //处理cgi
+  if (cgi == 1 && (*(p + 1) == '2' || *(p + 1) == '3')) {
+
+    //根据标志判断是登录检测还是注册检测
+    char flag = m_url[1];
+
+    char *m_url_real = (char *)malloc(sizeof(char) * 200);
+    strcpy(m_url_real, "/");
+    strcat(m_url_real, m_url + 2);
+    strncpy(m_real_file + len, m_url_real, FILENAME_LEN - len - 1);
+    free(m_url_real);
+
+    //将用户名和密码提取出来
+    // user=123&passwd=123
+    char name[100], password[100];
+    int i;
+    for (i = 5; m_string[i] != '&'; ++i)
+      name[i - 5] = m_string[i];
+    name[i - 5] = '\0';
+
+    int j = 0;
+    for (i = i + 10; m_string[i] != '\0'; ++i, ++j)
+      password[j] = m_string[i];
+    password[j] = '\0';
+
+    //同步线程登录校验
+    if (*(p + 1) == '3') {
+      //如果是注册，先检测数据库中是否有重名的
+      //没有重名的，进行增加数据
+      char *sql_insert = (char *)malloc(sizeof(char) * 200);
+      strcpy(sql_insert, "INSERT INTO user(username, passwd) VALUES(");
+      strcat(sql_insert, "'");
+      strcat(sql_insert, name);
+      strcat(sql_insert, "', '");
+      strcat(sql_insert, password);
+      strcat(sql_insert, "')");
+
+      if (users.find(name) == users.end()) {
+
+        m_lock.lock();
+        int res = mysql_query(mysql, sql_insert);
+        users.insert(pair<string, string>(name, password));
+        m_lock.unlock();
+
+        if (!res)
+          strcpy(m_url, "/log.html");
+        else
+          strcpy(m_url, "/registerError.html");
+      } else
+        strcpy(m_url, "/registerError.html");
+    }
+    //如果是登录，直接判断
+    //若浏览器端输入的用户名和密码在表中可以查找到，返回1，否则返回0
+    else if (*(p + 1) == '2') {
+      if (users.find(name) != users.end() && users[name] == password)
+        strcpy(m_url, "/welcome.html");
+      else
+        strcpy(m_url, "/logError.html");
+    }
+  }
 
   if (*(p + 1) == '0') {
     char *m_url_real = (char *)malloc(sizeof(char) * 200);
-    strcpy(m_url_real, "/welcome.html");
+    strcpy(m_url_real, "/register.html");
+    strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
+
+    free(m_url_real);
+  } else if (*(p + 1) == '1') {
+    char *m_url_real = (char *)malloc(sizeof(char) * 200);
+    strcpy(m_url_real, "/log.html");
     strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
 
     free(m_url_real);
@@ -366,6 +473,8 @@ http_conn::HTTP_CODE http_conn::do_request() {
     strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
 
     free(m_url_real);
+  } else {
+    strncpy(m_real_file + len, m_url, FILENAME_LEN - len - 1);
   }
 
   if (stat(m_real_file, &m_file_stat) < 0) /* stat()函数获取文件信息 */
@@ -532,6 +641,10 @@ bool http_conn::add_content_length(int content_len) {
   return add_response("Content-Length: %d\r\n", content_len);
 }
 
+bool http_conn::add_content_type()
+{
+    return add_response("Content-Type:%s\r\n", "text/html");
+}
 bool http_conn::add_linger() {
   return add_response("Connection: %s\r\n",
                       (m_linger == true) ? "keep-alive" : "close");

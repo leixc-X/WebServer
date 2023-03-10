@@ -1,8 +1,8 @@
 #include "http_conn.h"
 #include "../log/log.h"
+#include <fstream>
 #include <map>
 #include <mysql/mysql.h>
-#include <fstream>
 
 //#define CONNFDET //边缘触发非阻塞
 #define CONNFDLT //水平触发阻塞
@@ -641,12 +641,11 @@ bool http_conn::add_content_length(int content_len) {
   return add_response("Content-Length: %d\r\n", content_len);
 }
 
-bool http_conn::add_content_type()
-{
-    return add_response("Content-Type:%s\r\n", "text/html");
+bool http_conn::add_content_type() {
+  return add_response("Content-Type:%s\r\n", "text/html");
 }
 bool http_conn::add_linger() {
-  return add_response("Connection: %s\r\n",
+  return add_response("Connection:%s\r\n",
                       (m_linger == true) ? "keep-alive" : "close");
 }
 

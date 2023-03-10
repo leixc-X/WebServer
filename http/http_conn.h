@@ -148,7 +148,7 @@ private:
   char m_real_file[FILENAME_LEN];
   /* 客户请求目标文件的文件名 */
   char *m_url;
-  /* HTTP版本号，仅支持1.1 */
+  /* HTTP版本号 */
   char *m_version;
   /* 主机名 */
   char *m_host;

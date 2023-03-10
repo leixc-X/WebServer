@@ -121,19 +121,22 @@ int main(int argc, char *argv[]) {
 
   int listenfd = socket(PF_INET, SOCK_STREAM, 0);
   assert(listenfd >= 0);
-  struct linger tmp = {1, 0};
-  setsockopt(listenfd, SOL_SOCKET, SO_LINGER, &tmp, sizeof(tmp));
+  // struct linger tmp = {1, 0};
+  // SO_LINGER若有数据待发送，延迟关闭
+  // setsockopt(listenfd, SOL_SOCKET, SO_LINGER, &tmp, sizeof(tmp));
 
   int ret = 0;
   struct sockaddr_in address;
   bzero(&address, sizeof(address));
   address.sin_family = AF_INET;
   inet_pton(AF_INET, ip, &address.sin_addr);
+  // address.sin_addr.s_addr = htonl(INADDR_ANY);
   address.sin_port = htons(port);
 
+  int flag = 1;
+  setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag));
   ret = bind(listenfd, (struct sockaddr *)&address, sizeof(address));
   assert(ret >= 0);
-
   ret = listen(listenfd, 5);
   assert(ret >= 0);
 
@@ -141,6 +144,7 @@ int main(int argc, char *argv[]) {
   epoll_event events[MAX_EVENT_NUMBER];
   int epollfd = epoll_create(5);
   assert(epollfd != -1);
+
   addfd(epollfd, listenfd, false); // 默认LT模式
   http_conn::m_epollfd = epollfd;
 
@@ -189,9 +193,9 @@ int main(int argc, char *argv[]) {
         /* 初始化客户连接 */
         users[connfd].init(connfd, client_address);
 
-        /*   初始化client_data数据
-             创建定时器，设置回调函数和超时时间，绑定用户数据，将定时器添加到链表中
-         */
+        //初始化client_data数据
+        //创建定时器，设置回调函数和超时时间，绑定用户数据，将定时器添加到链表中
+
         users_timer[connfd].address = client_address;
         users_timer[connfd].sockfd = connfd;
         util_timer *timer = new util_timer;
@@ -204,6 +208,36 @@ int main(int argc, char *argv[]) {
 
 #endif
 
+#ifdef listenfdET
+        while (1) {
+          int connfd = accept(listenfd, (struct sockaddr *)&client_address,
+                              &client_addrlength);
+          if (connfd < 0) {
+            LOG_ERROR("%s:errno is:%d", "accept error", errno);
+            break;
+          }
+          if (http_conn::m_user_count >= MAX_FD) {
+            show_error(connfd, "Internal server busy");
+            LOG_ERROR("%s", "Internal server busy");
+            break;
+          }
+          users[connfd].init(connfd, client_address);
+
+          //初始化client_data数据
+          //创建定时器，设置回调函数和超时时间，绑定用户数据，将定时器添加到链表中
+          users_timer[connfd].address = client_address;
+          users_timer[connfd].sockfd = connfd;
+          util_timer *timer = new util_timer;
+          timer->user_data = &users_timer[connfd];
+          timer->cb_func = cb_func;
+          time_t cur = time(NULL);
+          timer->expire = cur + 3 * TIMESLOT;
+          users_timer[connfd].timer = timer;
+          timer_lst.add_timer(timer);
+        }
+        continue;
+#endif
+
       } else if (events[i].events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)) {
 
         //服务器端关闭连接，移除对应的定时器
@@ -214,8 +248,6 @@ int main(int argc, char *argv[]) {
           timer_lst.del_timer(timer);
         }
 
-        // /* 如果发生异常，直接关闭客户端连接 */
-        // users[sockfd].close_conn();
       }
       //处理信号
       else if ((sockfd == pipefd[0]) && (events[i].events & EPOLLIN)) {
@@ -295,11 +327,11 @@ int main(int argc, char *argv[]) {
             Log::get_instance()->flush();
 
             timer_lst.adjust_timer(timer);
-          } else {
-            timer->cb_func(&users_timer[sockfd]);
-            if (timer) {
-              timer_lst.del_timer(timer);
-            }
+          }
+        } else {
+          timer->cb_func(&users_timer[sockfd]);
+          if (timer) {
+            timer_lst.del_timer(timer);
           }
         }
       }

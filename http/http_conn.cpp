@@ -26,7 +26,7 @@ const char *error_500_form =
     "There was an unusual problem serving the requested file. \n";
 
 /* 网站根目录 */
-const char *doc_root = "/home/lxc/coding/myProject/linuxWebServer/root";
+const char *doc_root = "/home/lxc/coding/myProject/LinuxWebServer/root";
 
 //将表中的用户名和密码放入map
 map<string, string> users;

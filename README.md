@@ -5,6 +5,7 @@ Linux下轻量级Web服务器，自学网络编程入门项目，后续会持续
 * 使用状态机解析HTTP请求报文，支持GET请求和POST请求
 * 基于升序链表实现定时器，关闭超时的非活动连接
 * 利用单例模式与阻塞队列实现异步的日志系统，记录服务器运行状态
+* 使用cmake替换原来的makefile来构建项目。cmake代码注释可供学习使用
 
 
 ### 环境要求
@@ -40,32 +41,50 @@ Linux下轻量级Web服务器，自学网络编程入门项目，后续会持续
    ```
    ip:port/[目标资源]
    ```
-
+ * 可以使用cmake构建（可选）
+   ```
+   //根目录下执行
+   rm -rf build/        # 删除项目原来的build文件
+   cmake -B build       # 生成构建目录，-B 指定生成的构建系统代码放在 build 目录
+   cmake --build build  # 执行构建
+   ./server [ip] [prot] # 可执行文件默认生成目录是根目录，可在根目录下的CMakeLists中进行修改（详见注释）
+   ```
 
 ### 代码结构
 
-    .
-    ├── http            http连接处理类
-    │   ├── http_conn.cpp
-    │   └── http_conn.h
-    ├── timer           定时升序链表类
-    │   ├── list_time.cpp
-    │   └── list_time.h
-    ├── log             日志
-    │   ├── log.cpp
-    │   └── log.h
-    │   └── block_queue.h
-    ├── lock            线程同步机制包装类
-    │   └── locker.h
-    ├── main.cpp        主入口
-    ├── makefile
-    ├── README.md
-    ├── root            静态资源位置
-    │   └── welcome.html
-    ├── server          可执行文件
-    └── threadpool      线程池
-        ├── processpool.h
-        └── threadpool.h
+├── build 
+│   ├── cmake构建目录
+├── CGImysql
+│   ├── CMakeLists.txt
+│   ├── sql_connection_pool.cpp
+│   └── sql_connection_pool.h
+├── CMakeLists.txt
+├── http
+│   ├── CMakeLists.txt
+│   ├── http_conn.cpp
+│   └── http_conn.h
+├── lib
+│   ├── liblibHttp.a
+│   ├── liblibLog.a
+│   └── liblibSqlPool.a
+├── lock
+│   └── locker.h
+├── log
+│   ├── block_queue.h
+│   ├── CMakeLists.txt
+│   ├── log.cpp
+│   └── log.h
+├── main.cpp
+├── makefile
+├── README.md
+├── root
+│   ├── xxx资源
+├── server
+├── test_presure
+├── threadpool
+│   └── threadpool.h
+└── timer
+    └── lst_timer.h
 
 
 ### 参考
